@@ -1,7 +1,5 @@
 <?php
 header("Content-Type: text/html; charset=utf-8");
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
 
 try {
     // Подключение к БД
@@ -11,59 +9,46 @@ try {
     $dsn = "pgsql:host={$db_params['host']};port={$db_params['port']};dbname=" . ltrim($db_params['path'], '/');
     $pdo = new PDO($dsn, $db_params['user'], $db_params['pass']);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    // Устанавливаем кодировку
     $pdo->exec("SET NAMES 'UTF8'");
-    
-    // ВСЕГДА используем дату из PostgreSQL, а не из PHP!
-    $stmt = $pdo->query("SELECT CURRENT_DATE as today, CURRENT_DATE + INTERVAL '1 day' as tomorrow");
-    $dates = $stmt->fetch(PDO::FETCH_ASSOC);
-    $todaySData = $dates['today'];
-    $tomorrowSData = $dates['tomorrow'];
-    
-    echo "✅ Дата из PostgreSQL:<br>";
-    echo "- Сегодня (CURRENT_DATE): " . $todaySData . "<br>";
-    echo "- Завтра: " . $tomorrowSData . "<br>";
-    echo "- Дата из PHP (date()): " . date("Y-m-d") . " ← НЕ ИСПОЛЬЗУЕМ!<br><br>";
     
     // Получаем день из POST
     $day = $_POST['day'] ?? null;
     
-    // Если нет параметра day, показываем тестовую информацию
+    // Для тестирования через браузер
+    if (!$day && isset($_GET['test'])) {
+        $day = $_GET['test'];
+    }
+    
+    // Если день не передан, показываем информацию
     if (!$day) {
-        echo "<h3>Тестирование:</h3>";
+        echo "<h2>Сервер праздников работает!</h2>";
+        echo "Текущая дата на сервере: " . date('Y-m-d H:i:s') . "<br>";
+        echo "Часовой пояс: " . date_default_timezone_get() . "<br><br>";
         
-        // Всего записей
-        $stmt = $pdo->query("SELECT COUNT(*) FROM tab");
-        $count = $stmt->fetchColumn();
-        echo "Записей в таблице tab: " . $count . "<br>";
+        // Проверяем даты в БД
+        $stmt = $pdo->query("SELECT CURRENT_DATE as server_date, COUNT(*) as total FROM tab");
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        echo "Дата на сервере (CURRENT_DATE): " . $result['server_date'] . "<br>";
+        echo "Всего записей в БД: " . $result['total'] . "<br><br>";
         
-        // Праздники на СЕГОДНЯ (из БД!)
-        $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = :today");
-        $stmt->execute([':today' => $todaySData]);
-        $todayHolidays = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        
-        echo "Праздников на сегодня ($todaySData): " . count($todayHolidays) . "<br>";
-        foreach ($todayHolidays as $holiday) {
-            echo "- " . htmlspecialchars($holiday) . "<br>";
+        // Показываем распределение по датам
+        $stmt = $pdo->query("SELECT date_grigorian, COUNT(*) as count FROM tab GROUP BY date_grigorian ORDER BY date_grigorian");
+        echo "Праздники по датам:<br>";
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $isToday = ($row['date_grigorian'] == $result['server_date']) ? " (СЕГОДНЯ!)" : "";
+            $isTomorrow = ($row['date_grigorian'] == date('Y-m-d', strtotime($result['server_date'] . ' +1 day'))) ? " (ЗАВТРА!)" : "";
+            echo "- " . $row['date_grigorian'] . ": " . $row['count'] . " праздников" . $isToday . $isTomorrow . "<br>";
         }
         
-        // Праздники на ЗАВТРА (из БД!)
-        $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = :tomorrow");
-        $stmt->execute([':tomorrow' => $tomorrowSData]);
-        $tomorrowHolidays = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        
-        echo "Праздников на завтра ($tomorrowSData): " . count($tomorrowHolidays) . "<br>";
-        foreach ($tomorrowHolidays as $holiday) {
-            echo "- " . htmlspecialchars($holiday) . "<br>";
-        }
-        
-        echo "<hr><h4>Для Android приложения:</h4>";
-        echo "Отправляйте POST запрос с параметром 'day=1' (сегодня) или 'day=2' (завтра)";
+        echo "<br>Для Android приложения отправляйте POST запрос с параметром 'day=1' (сегодня) или 'day=2' (завтра)";
         exit;
     }
     
-    // ОСНОВНАЯ ЛОГИКА ДЛЯ ANDROID
+    // ОСНОВНАЯ ЛОГИКА - всегда используем CURRENT_DATE из PostgreSQL!
     if ($day == 1) {
-        // Сегодняшние праздники
+        // Сегодняшние праздники - используем CURRENT_DATE из БД
         $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = CURRENT_DATE");
         $stmt->execute();
     } else if ($day == 2) {
@@ -71,10 +56,9 @@ try {
         $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = CURRENT_DATE + INTERVAL '1 day'");
         $stmt->execute();
     } else {
-        // Для других дней (если нужно)
-        $offset = $day - 1;
-        $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = CURRENT_DATE + INTERVAL :offset day");
-        $stmt->execute([':offset' => $offset]);
+        // Для других дней
+        $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = CURRENT_DATE + INTERVAL :days day");
+        $stmt->execute([':days' => $day - 1]);
     }
     
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -84,7 +68,6 @@ try {
         foreach ($rows as $row) {
             $all_holidays[] = $row['text'];
         }
-        // Выводим каждый праздник с новой строки
         echo implode("\n", $all_holidays);
     } else {
         echo "Праздников на эту дату не найдено.";
@@ -92,9 +75,7 @@ try {
     
     $pdo = null;
     
-} catch (PDOException $e) {
-    echo "Ошибка БД: " . $e->getMessage();
 } catch (Exception $e) {
-    echo "Ошибка: " . $e->getMessage();
+    echo "Exception: " . $e->getMessage();
 }
 ?>
