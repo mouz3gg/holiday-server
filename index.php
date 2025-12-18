@@ -30,84 +30,113 @@ if (empty($db_host) || empty($db_name) || empty($db_user)) {
     die("ОШИБКА: Не хватает данных для подключения. Проверьте строку DATABASE_URL");
 }
 
-// Создаем строку подключения для pg_connect()
-$conn_string = "host={$db_host} port={$db_port} dbname={$db_name} user={$db_user} password={$db_pass}";
-
 echo "Пытаемся подключиться к: {$db_host}<br>";
 echo "База данных: {$db_name}<br>";
 echo "Пользователь: {$db_user}<br>";
 
-// Подключаемся к БД
-// Альтернатива в index.php - используем PDO вместо pg_*
 try {
-    $db_url = getenv('DATABASE_URL');
-    $db_params = parse_url($db_url);
+    // Подключаемся к БД через PDO
+    $dsn = "pgsql:host={$db_host};port={$db_port};dbname={$db_name}";
+    $pdo = new PDO($dsn, $db_user, $db_pass);
     
-    $dsn = "pgsql:host=" . $db_params['host'] . 
-           ";port=" . ($db_params['port'] ?? 5432) . 
-           ";dbname=" . ltrim($db_params['path'], '/');
-    
-    $pdo = new PDO($dsn, $db_params['user'], $db_params['pass']);
+    // Устанавливаем режим ошибок
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     
-    echo "✅ Подключение через PDO успешно!";
+    // Устанавливаем кодировку UTF-8
+    $pdo->exec("SET NAMES 'UTF8'");
+    
+    echo "✅ Подключение через PDO успешно!<br>";
+    
+    // Проверяем версию PostgreSQL
+    $stmt = $pdo->query("SELECT version()");
+    $version = $stmt->fetchColumn();
+    echo "Версия PostgreSQL: " . $version . "<br>";
+    
+    // Получаем день из POST-запроса от Android приложения
+    $day = $_POST['day'] ?? null;
+    
+    // Для ручного тестирования через браузер - раскомментируйте следующую строку:
+    // $day = 1;
+    
+    if (!$day) {
+        // Если день не передан, показываем тестовую информацию
+        echo "<hr>";
+        echo "<h3>✅ Сервер работает! Тестирование:</h3>";
+        
+        // Проверяем таблицу
+        $stmt = $pdo->query("SELECT COUNT(*) FROM tab");
+        $count = $stmt->fetchColumn();
+        echo "Записей в таблице tab: " . $count . "<br>";
+        
+        // Показываем сегодняшние праздники
+        $today = date("Y-m-d");
+        $stmt = $pdo->prepare("SELECT text FROM tab WHERE date_grigorian = :today");
+        $stmt->execute([':today' => $today]);
+        $todayHolidays = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        echo "Праздников на сегодня ($today): " . count($todayHolidays) . "<br>";
+        if ($todayHolidays) {
+            foreach ($todayHolidays as $holiday) {
+                echo "- " . htmlspecialchars($holiday) . "<br>";
+            }
+        }
+        
+        // Показываем завтрашние праздники
+        $stmt = $pdo->query("SELECT text FROM tab WHERE date_grigorian = (CURRENT_DATE + INTERVAL '1 day')");
+        $tomorrowHolidays = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        
+        $tomorrow = date("Y-m-d", strtotime("+1 day"));
+        echo "Праздников на завтра ($tomorrow): " . count($tomorrowHolidays) . "<br>";
+        if ($tomorrowHolidays) {
+            foreach ($tomorrowHolidays as $holiday) {
+                echo "- " . htmlspecialchars($holiday) . "<br>";
+            }
+        }
+        
+        echo "<hr>";
+        echo "<h4>Для Android приложения отправляйте POST запрос с параметром 'day'</h4>";
+        echo "Пример: day=1 (сегодня) или day=2 (завтра)";
+        
+        // Закрываем соединение
+        $pdo = null;
+        exit;
+    }
+    
+    $todaySData = date("Y-m-d");
+    
+    /* Если $day = 1, то находим сегодняшний праздник*/
+    /* Если $day = 2, то находим завтрашний праздник*/
+    if ($day == 1) {
+        $query = "SELECT text FROM tab WHERE date_grigorian = :date";
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([':date' => $todaySData]);
+    } else {
+        // Для PostgreSQL используем CURRENT_DATE + INTERVAL '1 day'
+        $query = "SELECT text FROM tab WHERE date_grigorian = (CURRENT_DATE + INTERVAL '1 day')";
+        $stmt = $pdo->query($query);
+    }
+    
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    if ($rows) {
+        // Собираем все праздники в одну строку
+        $all_holidays = [];
+        foreach ($rows as $row) {
+            $all_holidays[] = $row['text'];
+        }
+        
+        // Отправляем праздники разделенные переносом строки
+        echo implode("\n", $all_holidays);
+    } else {
+        echo "Праздников на эту дату не найдено.";
+    }
+    
+    // Закрываем соединение
+    $pdo = null;
     
 } catch (PDOException $e) {
     die("❌ Ошибка PDO: " . $e->getMessage());
+} catch (Exception $e) {
+    die("❌ Общая ошибка: " . $e->getMessage());
 }
-
-if (!$conn) {
-    echo "ОШИБКА подключения к PostgreSQL: " . pg_last_error() . "<br>";
-    echo "Проверьте:<br>";
-    echo "1. Правильность DATABASE_URL<br>";
-    echo "2. Доступность БД<br>";
-    echo "3. Наличие расширения pgsql в PHP<br>";
-    exit;
-}
-
-echo "Успешно подключились к PostgreSQL!<br>";
-
-// Проверяем версию PostgreSQL
-$result = pg_query($conn, "SELECT version()");
-$version = pg_fetch_result($result, 0);
-echo "Версия PostgreSQL: " . $version . "<br>";
-
-// Устанавливаем кодировку UTF-8
-pg_set_client_encoding($conn, "UTF-8");
-
-// Получаем день из POST-запроса от Android приложения
-$day = $_POST['day'];
-// $day = 1; // Для ручного тестирования через браузер
-
-$todaySData = date("Y-m-d");
-
-/* Если $day = 1, то находим сегодняшний праздник*/
-/* Если $day = 2, то находим завтрашний праздник*/
-if ($day == 1) {
-    $query = "SELECT text FROM tab WHERE date_grigorian = '" . $todaySData . "'";
-} else {
-    // Для PostgreSQL используем CURRENT_DATE + INTERVAL '1 day'
-    $query = "SELECT text FROM tab WHERE date_grigorian = (CURRENT_DATE + INTERVAL '1 day')";
-}
-
-$result = pg_query($conn, $query);
-
-if (!$result) {
-    echo "Ошибка запроса: " . pg_last_error($conn);
-    pg_close($conn);
-    exit;
-}
-
-$row = pg_fetch_array($result, null, PGSQL_ASSOC);
-$data = $row['text'];
-
-if ($data) {
-    /* Вывод информации в окно приложения */
-    echo $data;
-} else {
-    echo "Праздников на эту дату не найдено.";
-}
-
-// Закрываем соединение
-pg_close($conn);
 ?>
