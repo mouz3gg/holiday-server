@@ -30,10 +30,6 @@ if (empty($db_host) || empty($db_name) || empty($db_user)) {
     die("ОШИБКА: Не хватает данных для подключения. Проверьте строку DATABASE_URL");
 }
 
-echo "Пытаемся подключиться к: {$db_host}<br>";
-echo "База данных: {$db_name}<br>";
-echo "Пользователь: {$db_user}<br>";
-
 try {
     // Подключаемся к БД через PDO
     $dsn = "pgsql:host={$db_host};port={$db_port};dbname={$db_name}";
@@ -45,12 +41,9 @@ try {
     // Устанавливаем кодировку UTF-8
     $pdo->exec("SET NAMES 'UTF8'");
     
-    echo "✅ Подключение через PDO успешно!<br>";
-    
     // Проверяем версию PostgreSQL
     $stmt = $pdo->query("SELECT version()");
     $version = $stmt->fetchColumn();
-    echo "Версия PostgreSQL: " . $version . "<br>";
     
     // Получаем день из POST-запроса от Android приложения
     $day = $_POST['day'] ?? null;
@@ -60,8 +53,7 @@ try {
     
     if (!$day) {
         // Если день не передан, показываем тестовую информацию
-        echo "<hr>";
-        echo "<h3>✅ Сервер работает! Тестирование:</h3>";
+
         
         // Проверяем таблицу
         $stmt = $pdo->query("SELECT COUNT(*) FROM tab");
