@@ -1,19 +1,26 @@
-# Используем официальный образ PHP с Apache
 FROM php:8.2-apache
 
-# Устанавливаем расширения для PostgreSQL
+# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     libpq-dev \
-    && docker-php-ext-install pdo pdo_pgsql
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-# Включаем модуль rewrite для Apache (если понадобится)
+# Устанавливаем расширение PostgreSQL
+RUN docker-php-ext-install pdo pdo_pgsql
+
+# Включаем модуль Apache
 RUN a2enmod rewrite
 
-# Копируем все файлы проекта в контейнер
+# Копируем файлы
 COPY . /var/www/html/
 
 # Устанавливаем права
 RUN chown -R www-data:www-data /var/www/html
 
-# Указываем рабочую директорию
+# Рабочая директория
 WORKDIR /var/www/html
+
+# Проверяем установленные расширения
+RUN php -m | grep -i pdo
+RUN php -m | grep -i pgsql
