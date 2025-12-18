@@ -38,7 +38,23 @@ echo "База данных: {$db_name}<br>";
 echo "Пользователь: {$db_user}<br>";
 
 // Подключаемся к БД
-$conn = pg_connect($conn_string);
+// Альтернатива в index.php - используем PDO вместо pg_*
+try {
+    $db_url = getenv('DATABASE_URL');
+    $db_params = parse_url($db_url);
+    
+    $dsn = "pgsql:host=" . $db_params['host'] . 
+           ";port=" . ($db_params['port'] ?? 5432) . 
+           ";dbname=" . ltrim($db_params['path'], '/');
+    
+    $pdo = new PDO($dsn, $db_params['user'], $db_params['pass']);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    echo "✅ Подключение через PDO успешно!";
+    
+} catch (PDOException $e) {
+    die("❌ Ошибка PDO: " . $e->getMessage());
+}
 
 if (!$conn) {
     echo "ОШИБКА подключения к PostgreSQL: " . pg_last_error() . "<br>";
